@@ -1,0 +1,24 @@
+{
+  "name": "kitchen-ledger",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.mjs",
+    "test": "node --test tests/*.test.mjs",
+    "build": "node scripts/build-worker.mjs",
+    "pretest": "node scripts/build-worker.mjs",
+    "test:browser": "node tests/browser.mjs",
+    "test:recipes": "node tests/v2-browser.mjs",
+    "test:cloud": "node tests/v2-cloud-browser.mjs",
+    "test:lists": "node tests/pagination-browser.mjs",
+    "test:auth": "node tests/auth-browser.mjs"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.3.14",
+    "@playwright/test": "^1.56.0"
+  },
+  "description": "Restaurant invoice OCR, purchasing, inventory and recipe sales with Supabase",
+  "engines": {
+    "node": ">=22"
+  }
+}

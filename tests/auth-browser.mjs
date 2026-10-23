@@ -1,0 +1,30 @@
+import {chromium} from '@playwright/test';
+import assert from 'node:assert/strict';
+import {mkdir} from 'node:fs/promises';
+import {seed} from '../web/domain.js';
+import {SUPABASE_URL} from '../web/config.js';
+import {server} from '../server.mjs';
+await new Promise(r=>server.listen(4192,'127.0.0.1',r));const browser=await chromium.launch({...(process.env.PLAYWRIGHT_CHANNEL?{channel:process.env.PLAYWRIGHT_CHANNEL}:{}),headless:true});const context=await browser.newContext({viewport:{width:1440,height:1000}});const page=await context.newPage();page.setDefaultTimeout(15000);await page.clock.install();const errors=[];page.on('pageerror',e=>errors.push(e.message));let signups=0,resends=0,confirmed=false,states=0;
+await context.route(SUPABASE_URL+'/**',async route=>{
+ const request=route.request(),url=new URL(request.url()),body=request.postDataJSON();
+ if(url.pathname==='/auth/v1/signup'){signups++;assert.equal(url.searchParams.get('redirect_to'),'http://127.0.0.1:4192/');assert.equal(body.email,'owner@example.test');return route.fulfill({json:{id:'new-user',email:body.email}});}
+ if(url.pathname==='/auth/v1/resend'){resends++;assert.equal(body.type,'signup');assert.equal(body.email,'owner@example.test');assert.equal(url.searchParams.get('redirect_to'),'http://127.0.0.1:4192/');return route.fulfill({json:{}});}
+ if(url.pathname==='/auth/v1/user'){assert.equal(request.headers().authorization,'Bearer test-verification-token');return route.fulfill({json:{id:'new-user',email:'owner@example.test',email_confirmed_at:'2026-10-23T12:00:00Z'}});}
+ if(url.pathname==='/auth/v1/token'){if(!confirmed)return route.fulfill({status:400,json:{code:'email_not_confirmed',msg:'Email not confirmed'}});return route.fulfill({json:{access_token:'test-session-token',refresh_token:'test-refresh',expires_in:3600,user:{id:'new-user',email:'owner@example.test'}}});}
+ if(url.pathname.endsWith('/ledger_state')){states++;return route.fulfill({json:{...seed(),version:2,recipes:[],sales:[]}});}
+ throw Error('Unexpected test request '+url.pathname);
+});
+try{
+ await page.goto('http://127.0.0.1:4192');await page.getByRole('button',{name:'Connection & data',exact:true}).click();
+ assert.equal(await page.getByRole('heading',{name:'First-version boundaries',exact:true}).count(),0);assert.equal(await page.getByRole('heading',{name:'Version 2 database upgrade',exact:true}).count(),0);
+ await page.getByRole('button',{name:'Create app account',exact:true}).click();await page.locator('#auth-form input[name=email]').fill('owner@example.test');await page.locator('#auth-form input[name=password]').fill('test-password-only-123');await page.locator('#auth-form input[name=confirmPassword]').fill('different-password');await page.locator('#auth-form button[type=submit]').click();await page.getByText('The passwords do not match.',{exact:true}).waitFor();assert.equal(signups,0);
+ await page.locator('#auth-form input[name=confirmPassword]').fill('test-password-only-123');await page.locator('#auth-form button[type=submit]').click();await page.getByRole('heading',{name:'Check your email',exact:true}).waitFor();assert.equal(signups,1);assert.equal(states,0);assert.ok(await page.locator('#resend-confirmation').isDisabled());
+ assert.equal(await page.evaluate(()=>JSON.parse(sessionStorage.getItem('kitchen-ledger-session')||'null')),null);assert.ok(!(await page.evaluate(()=>JSON.stringify({...sessionStorage,...localStorage}))).includes('test-password-only-123'));
+ await page.reload();await page.getByRole('heading',{name:'Check your email',exact:true}).waitFor();assert.ok(await page.locator('#resend-confirmation').isDisabled());await page.clock.fastForward(61000);const resendResponse=page.waitForResponse(r=>new URL(r.url()).pathname==='/auth/v1/resend');await page.locator('#resend-confirmation').click();await resendResponse;assert.equal(resends,1);assert.ok(await page.locator('#resend-confirmation').isDisabled());
+ await page.getByRole('button',{name:'I verified my email · Sign in',exact:true}).click();await page.locator('#auth-form input[name=password]').fill('test-password-only-123');await page.getByRole('button',{name:'Sign in',exact:true}).click();await page.getByText('Verify your email before signing in. You can request a new link below.',{exact:true}).waitFor();assert.equal(states,0);
+ await page.goto('http://127.0.0.1:4192/#error=access_denied&error_code=otp_expired');await page.getByText('This verification link is invalid or has expired. Request a new email below.',{exact:true}).waitFor();assert.equal(new URL(page.url()).hash,'');
+ confirmed=true;await page.goto('http://127.0.0.1:4192/#access_token=test-verification-token&refresh_token=test-verification-refresh&type=signup');await page.getByText('Email verified. Sign in to open your restaurant workspace.',{exact:true}).waitFor();assert.equal(new URL(page.url()).hash,'');assert.equal(await page.evaluate(()=>sessionStorage.getItem('kitchen-ledger-session')),null);
+ await mkdir('test-results',{recursive:true});await page.screenshot({path:'test-results/auth-desktop.png',fullPage:true});await page.locator('#auth-form input[name=password]').fill('test-password-only-123');await page.getByRole('button',{name:'Sign in',exact:true}).click();await page.getByText('Supabase · signed in',{exact:true}).waitFor();assert.equal(states,1);
+ await page.getByRole('button',{name:'Connection & data',exact:true}).click();assert.equal(await page.getByRole('heading',{name:'First-version boundaries',exact:true}).count(),0);assert.equal(await page.getByRole('heading',{name:'Version 2 database upgrade',exact:true}).count(),0);await page.setViewportSize({width:390,height:844});assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));assert.deepEqual(errors,[]);
+ console.log('Account UI passed: confirmation-password validation, signup redirect, pending-email step/reload, resend cooldown, unverified sign-in rejection, expired links, server-checked confirmation callback, token URL cleanup, explicit sign-in and workspace load, removed public setup sections. No real emails sent.');
+}finally{await browser.close();server.close();}

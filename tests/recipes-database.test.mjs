@@ -1,0 +1,22 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {readFile} from 'node:fs/promises';
+import {PGlite} from '@electric-sql/pglite';
+test('v2 SQL migration, atomic recipes, ownership, daily uniqueness, retry and reversal',async()=>{
+ const db=new PGlite();await db.exec(`create role anon;create role authenticated;create schema auth;create table auth.users(id uuid primary key);create function auth.uid() returns uuid language sql as $$select nullif(current_setting('app.user',true),'')::uuid$$;grant usage on schema auth to authenticated;create schema storage;create table storage.buckets(id text primary key,name text,public boolean,file_size_limit bigint,allowed_mime_types text[]);create table storage.objects(bucket_id text,name text);create function storage.foldername(text) returns text[] language sql as $$select string_to_array($1,'/')$$;`);
+ await db.exec(await readFile('supabase/migrations/001_restaurant_ledger.sql','utf8'));await db.exec(await readFile('supabase/migrations/002_recipes_and_sales.sql','utf8'));
+ const owner=crypto.randomUUID(),other=crypto.randomUUID(),beef=crypto.randomUUID(),bun=crypto.randomUUID(),recipe=crypto.randomUUID();await db.query('insert into auth.users values($1),($2)',[owner,other]);await db.query("select set_config('app.user',$1,false)",[owner]);
+ const action=async(a,p)=>(await db.query('select public.ledger_action($1,$2::jsonb) as state',[a,JSON.stringify(p)])).rows[0].state;
+ const load=async()=>(await db.query('select public.ledger_state() as state')).rows[0].state;
+ await action('product',{id:beef,name:'Beef',baseUnit:'kg',trackStock:true});await action('product',{id:bun,name:'Buns',baseUnit:'each',trackStock:true});await action('adjust',{productId:beef,quantity:8,type:'adjustment',reason:'Opening'});await action('adjust',{productId:bun,quantity:10,type:'adjustment',reason:'Opening'});
+ const r={id:recipe,name:'Burger',yieldServings:1,revision:0,ingredients:[{productId:beef,quantity:150,unit:'g'},{productId:bun,quantity:1,unit:'each'}]};let s=await action('recipe_save',r);assert.equal(s.version,2);assert.equal(s.recipes[0].revision,1);
+ await assert.rejects(action('recipe_save',{...r,revision:1,ingredients:[{productId:beef,quantity:1,unit:'l'}]}),/Incompatible/);
+ const p={id:crypto.randomUUID(),date:'2026-10-18',note:'Dinner',entries:[{recipeId:recipe,revision:1,servings:25}]};await assert.rejects(action('sales_post',p),/Not enough/);assert.equal((await load()).movements.length,2);assert.equal((await load()).sales.length,0);
+ p.entries[0].servings=5;s=await action('sales_post',p);assert.equal(s.sales.length,1);assert.equal(s.movements.length,4);assert.equal(s.sales[0].usage.find(i=>i.productId===beef).quantity,.75);assert.equal(s.movements.filter(m=>m.productId===bun).reduce((a,m)=>a+m.quantity,0),5);
+ s=await action('sales_post',p);assert.equal(s.movements.length,4);await assert.rejects(action('sales_post',{...p,id:crypto.randomUUID()}),/already recorded/);await assert.rejects(action('sales_post',{...p,note:'Different'}),/request ID/);
+ await action('recipe_save',{...r,revision:1,ingredients:[{productId:beef,quantity:200,unit:'g'}]});await assert.rejects(action('sales_post',{...p,id:crypto.randomUUID(),date:'2026-10-19'}),/changed/);
+ s=await action('sales_void',{id:p.id});assert.ok(s.sales[0].voidedAt);assert.equal(s.movements.filter(m=>m.productId===beef).reduce((a,m)=>a+m.quantity,0),8);assert.equal(s.movements.filter(m=>m.productId===bun).reduce((a,m)=>a+m.quantity,0),10);const n=s.movements.length;s=await action('sales_void',{id:p.id});assert.equal(s.movements.length,n);
+ await db.query("select set_config('app.user',$1,false)",[other]);assert.equal((await load()).recipes.length,0);await assert.rejects(action('sales_void',{id:p.id}),/not found/);await assert.rejects(action('recipe_save',r),/not found/);
+ await db.exec('set role authenticated');assert.equal((await db.query('select * from public.ledger_sales_batches')).rows.length,0);await assert.rejects(db.exec("delete from public.ledger_recipes"),/permission denied/);await assert.rejects(db.exec("select public.ledger_state_v1()"),/permission denied/);await db.exec('reset role');
+ await db.close();
+});

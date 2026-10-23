@@ -1,0 +1,40 @@
+export const uid=()=>crypto.randomUUID();
+export const money=(n,currency='USD')=>{try{return new Intl.NumberFormat('en-US',{style:'currency',currency}).format(Number(n)||0);}catch{return `${(Number(n)||0).toFixed(2)} ${currency}`;}};
+export const round=n=>Math.round((Number(n)+Number.EPSILON)*100)/100;
+export const normalized=n=>String(n??'').trim().toUpperCase();
+export function validate(invoice,state){
+ const issues=[];const add=(field,message)=>issues.push({field,message});
+ if(!state.suppliers.some(s=>s.id===invoice.supplierId))add('supplierId','Choose a supplier.');
+ if(!String(invoice.number||'').trim())add('number','Enter an invoice number.');
+ for(const f of ['date','dueDate']){const d=new Date(invoice[f]+'T00:00:00Z');if(invoice[f]&&(!/^\d{4}-\d{2}-\d{2}$/.test(invoice[f])||!Number.isFinite(d.getTime())||d.toISOString().slice(0,10)!==invoice[f]))add(f,'Enter a valid date.');}
+ if(!invoice.date)add('date','Enter the invoice date.');
+ if(invoice.currency!=='USD')add('currency','This first version supports USD invoices only.');
+ if(state.invoices.some(i=>i.id!==invoice.id&&i.status==='approved'&&i.supplierId===invoice.supplierId&&normalized(i.number)===normalized(invoice.number)))add('number','This supplier invoice number is already approved.');
+ if(!invoice.items.length)add('items','Add at least one invoice line.');
+ invoice.items.forEach((l,k)=>{
+  const p=`items.${k}`;const product=state.products.find(p=>p.id===l.productId);
+  if(!l.description.trim())add(p,'Enter a description.');
+  if(!product)add(p,'Match this line to an inventory item or expense.');
+  for(const f of ['quantity','price','amount','shippedQuantity','baseQuantity'])if(!Number.isFinite(Number(l[f]))||Number(l[f])<0)add(p,`${f} must be a nonnegative number.`);
+  if(Number(l.quantity)<=0)add(p,'Billing quantity must be greater than zero.');
+  if(Math.abs(round(l.quantity*l.price)-Number(l.amount))>0.011)add(p,`Line amount should be ${money(round(l.quantity*l.price),invoice.currency)}.`);
+  if(!l.billingUnit.trim())add(p,'Enter a billing unit.');
+  if(product?.trackStock&&Number(l.baseQuantity)<=0)add(p,'Confirm the quantity in the stock unit.');
+ });
+ for(const f of ['subtotal','tax','charges','discount','total'])if(!Number.isFinite(Number(invoice[f]))||Number(invoice[f])<0)add(f,'Enter a nonnegative amount.');
+ const sum=round(invoice.items.reduce((a,l)=>a+Number(l.amount),0));
+ if(Math.abs(sum-Number(invoice.subtotal))>0.011)add('subtotal',`Line items total ${money(sum,invoice.currency)}.`);
+ const expected=round(Number(invoice.subtotal)+Number(invoice.tax)+Number(invoice.charges)-Number(invoice.discount));
+ if(Math.abs(expected-Number(invoice.total))>0.011)add('total',`Expected total is ${money(expected,invoice.currency)}.`);
+ return issues;
+}
+export function approve(state,id){const i=state.invoices.find(x=>x.id===id);if(!i)throw Error('Invoice not found.');if(i.status==='approved')return state;const issues=validate(i,state);if(issues.length)throw Error(issues.map(x=>x.message).join(' '));i.status='approved';i.approvedAt=new Date().toISOString();state.events.push({id:uid(),invoiceId:id,action:'Invoice approved',at:i.approvedAt});return state;}
+export function receive(state,id,quantities){const i=state.invoices.find(x=>x.id===id);if(i?.status!=='approved')throw Error('Approve the invoice before confirming this delivery.');const changes=[];for(const l of i.items){const p=state.products.find(x=>x.id===l.productId);if(!p?.trackStock)continue;const q=Number(quantities[l.id]??0),remaining=Number(l.baseQuantity)-Number(l.received||0);if(!Number.isFinite(q)||q<0||q>remaining+0.000001)throw Error(`Receipt exceeds the remaining quantity for ${l.description}.`);if(q>0)changes.push({l,p,q});}if(!changes.length)throw Error('Enter a quantity to receive.');const receiptId=uid();for(const {l,p,q}of changes){l.received=Number(l.received||0)+q;state.movements.push({id:uid(),receiptId,invoiceId:id,itemId:l.id,productId:p.id,quantity:q,type:'receipt',reason:i.number,at:new Date().toISOString()});}state.events.push({id:uid(),invoiceId:id,action:'Delivery confirmed',at:new Date().toISOString()});return state;}
+export function adjust(state,productId,quantity,type,reason){const p=state.products.find(x=>x.id===productId);if(!p?.trackStock||!Number.isFinite(Number(quantity))||Number(quantity)===0||!reason.trim())throw Error('Choose a stock item, nonzero quantity, and reason.');if(!['waste','usage','return','adjustment'].includes(type))throw Error('Invalid movement type.');if(type!=='adjustment'&&Number(quantity)>0)throw Error('Waste, usage and returns must reduce stock.');if(stock(state,productId)+Number(quantity)<-0.000001)throw Error('This change would make stock negative.');state.movements.push({id:uid(),productId,quantity:Number(quantity),type,reason,at:new Date().toISOString()});return state;}
+export const stock=(state,id)=>state.movements.filter(m=>m.productId===id).reduce((a,m)=>a+Number(m.quantity),0);
+export function blankInvoice(){return {id:uid(),supplierId:'',number:'',date:new Date().toISOString().slice(0,10),dueDate:'',currency:'USD',status:'draft',subtotal:0,tax:0,charges:0,discount:0,total:0,items:[],sourceText:'',sourceName:'Manual entry',createdAt:new Date().toISOString()};}
+export function blankLine(){return {id:uid(),description:'',supplierCode:'',productId:'',quantity:1,billingUnit:'case',price:0,amount:0,shippedQuantity:1,shippedUnit:'case',baseQuantity:0,received:0};}
+export function seed(){const state={version:1,suppliers:[{id:'s1',name:'Harvest Foodservice',account:'HF-2048',email:'orders@example.com'},{id:'s2',name:'Lakeview Produce',account:'LP-102',email:'produce@example.com'},{id:'s3',name:'Kitchen Supply Co.',account:'KS-77',email:'supply@example.com'}],products:[{id:'p1',name:'Canned tomatoes',category:'Dry goods',baseUnit:'kg',storage:'Dry store',trackStock:true,reorder:15},{id:'p2',name:'Beef',category:'Meat',baseUnit:'kg',storage:'Walk-in fridge',trackStock:true,reorder:10},{id:'p3',name:'Takeaway cups',category:'Packaging',baseUnit:'each',storage:'Dry store',trackStock:true,reorder:500},{id:'p4',name:'Lemons',category:'Produce',baseUnit:'kg',storage:'Walk-in fridge',trackStock:true,reorder:5},{id:'p5',name:'Delivery service',category:'Expense',baseUnit:'service',storage:'—',trackStock:false,reorder:0}],invoices:[],movements:[],events:[]};
+const a={...blankInvoice(),id:'i1',supplierId:'s1',number:'HF-10482',date:'2026-10-08',dueDate:'2026-10-22',subtotal:325.8,total:325.8,sourceName:'Sample distributor invoice',items:[{...blankLine(),id:'l1',description:'Canned tomatoes · 6 × 2.5 kg',supplierCode:'TOM-001',productId:'p1',quantity:2,price:30,amount:60,shippedQuantity:2,baseQuantity:30},{...blankLine(),id:'l2',description:'Beef · variable weight',supplierCode:'BEEF-002',productId:'p2',quantity:18.4,billingUnit:'kg',price:12,amount:220.8,shippedQuantity:2,baseQuantity:18.4},{...blankLine(),id:'l3',description:'Takeaway cups · 1,000 per case',supplierCode:'CUP-003',productId:'p3',quantity:1,price:45,amount:45,baseQuantity:1000}]};a.sourceText='HARVEST FOODSERVICE\nInvoice: HF-10482\nDate: 2026-10-08\nDue: 2026-10-22\n\nTOM-001  Canned tomatoes  2 cases  $30.00  $60.00\nPack: 6 × 2.5 kg / case\nBEEF-002 Beef  2 cases / 18.4 kg  $12.00/kg  $220.80\nCUP-003 Takeaway cups  1 case  $45.00  $45.00\nPack: 1,000 each / case\n\nSubtotal: $325.80\nTax: $0.00\nTotal: $325.80';
+state.invoices.push(a,{...blankInvoice(),id:'i2',supplierId:'s2',number:'LP-8821',date:'2026-10-09',dueDate:'2026-10-16',subtotal:36,total:36,sourceName:'Sample produce invoice',sourceText:'LAKEVIEW PRODUCE\nInvoice: LP-8821\nLemons 6 kg × $6 = $36\nTotal: $36',items:[{...blankLine(),id:'l4',description:'Fresh lemons',productId:'p4',quantity:6,billingUnit:'kg',price:6,amount:36,shippedQuantity:6,shippedUnit:'kg',baseQuantity:6}]} );
+state.products.filter(p=>p.trackStock).forEach((p,k)=>state.movements.push({id:uid(),productId:p.id,quantity:[12,8,400,3][k],type:'opening',reason:'Dummy opening count',at:'2026-10-07T12:00:00Z'}));return state;}

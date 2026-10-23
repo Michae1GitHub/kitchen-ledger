@@ -1,0 +1,32 @@
+Wf FreshFields INVOICE
+NZ FOOD SUPPLY
+Invoi 3 -
+1250 Harvest Way nyolce Number: FFS-10428
+Riverside, CA 92507 Invoice Date: Apr 14, 2025
+Tel: (800) 555-0187 Due Date: May 14, 2025
+Email: orders@freshfieldsfoods.com PO Number: BV-7821
+www.freshfieldsfoods.com
+Bill To: Ship To:
+Bella Vista Bistro Bella Vista Bistro
+742 Oceanview Drive 742 Oceanview Drive
+San Diego, CA 92101 San Diego, CA 92101
+USA USA
+Item Code | Description | Quantity Unit Price Line Total
+TOM-001 Roma Tomatoes (25 Ib case) 2 $28.50 $57.00
+OLV-002 Extra Virgin Olive Oil (1 L) 4 $14.75 $59.00
+PAS-003 Italian Pasta, Linguine (10 Ib) 3] $12.40 $37.20
+SAL-004 Atlantic Salmon Fillets (5 Ib) 5 $18.90 $94.50
+CHE-005 Parmesan Cheese, Aged (5 Ib) 2 $22.00 $44.00
+GRN-006 Mixed Greens (3 Ib) 4 $8.25 $33.00
+COF-007 House Blend Coffee Beans (5 Ib) 2 $16.50 $33.00
+SPK-008 Sparkling Water (12 x 750 ml) 3 $11.20 $33.60
+Subtotal: $391.30
+Sales Tax (7.75%): $30.32
+Delivery Fee: $20.00
+Grand Total: $441.62
+Payment Terms: Net 30
+Please include invoice number with your payment. TE Se La aT
+Remit payments to:
+FreshFields Food Supply Thank you for your business.
+1250 Harvest Way of B
+Riverside, CA 92507 Quality ingredients. Stronger together.

@@ -1,0 +1,20 @@
+import {chromium} from '@playwright/test';
+import assert from 'node:assert/strict';
+import {server} from '../server.mjs';
+import {mkdir,writeFile} from 'node:fs/promises';
+await new Promise(r=>server.listen(4178,'127.0.0.1',r));
+const browser=await chromium.launch({...(process.env.PLAYWRIGHT_CHANNEL?{channel:process.env.PLAYWRIGHT_CHANNEL}:{}),headless:true});const page=await browser.newPage({viewport:{width:900,height:700}});page.setDefaultTimeout(120000);
+try{
+ await mkdir('test-results',{recursive:true});
+ const truth=['Supplier: Lakeview Produce','Invoice No: LP-444','Invoice Date: 14 October 2026','Description Qty Unit Price Amount','Lemons 6 $6.00 $36.00','Fresh onions 2 $12.50 $25.00','Subtotal: $61.00','Sales Tax: $4.88','Delivery Fee: $5.00','Grand Total: $70.88'].join('\n');
+ await page.setContent(`<pre id="invoice" style="margin:0;padding:14px;width:450px;background:#efefef;color:#777;font:11px Arial;line-height:1.8">${truth}</pre>`);const image=await page.locator('#invoice').screenshot();
+ await page.goto('http://127.0.0.1:4178');
+ const metrics=await page.evaluate(async ({image,truth})=>{const {extractText}=await import('/extraction.js');const file=new File([new Uint8Array(image)],'small-invoice.png',{type:'image/png'});const revised=await extractText(file,()=>{});const worker=await window.Tesseract.createWorker('eng');let baseline;try{baseline=(await worker.recognize(file)).data.text;}finally{await worker.terminate();}const normalize=s=>s.toLowerCase().replace(/\s/g,'');const distance=(a,b)=>{let row=Array.from({length:b.length+1},(_,i)=>i);for(let i=1;i<=a.length;i++){const next=[i];for(let j=1;j<=b.length;j++)next[j]=Math.min(next[j-1]+1,row[j]+1,row[j-1]+(a[i-1]!==b[j-1]));row=next;}return row[b.length];};const gold=normalize(truth);return {baselineText:baseline,revisedText:revised.text,baselineErrors:distance(normalize(baseline),gold),revisedErrors:distance(normalize(revised.text),gold),characters:gold.length};},{image:[...image],truth});
+ await writeFile('test-results/ocr-quality.json',JSON.stringify(metrics,null,2));assert.ok(metrics.revisedErrors<=metrics.baselineErrors,JSON.stringify(metrics));
+ await page.getByRole('button',{name:'+ Upload invoice',exact:true}).click();await page.locator('#invoice-file').setInputFiles({name:'small-invoice.png',mimeType:'image/png',buffer:image});await page.getByRole('button',{name:'Extract & open review'}).click();await page.locator('#invoice-form').waitFor();assert.equal(await page.locator('input[name=number]').inputValue(),'LP-444');assert.equal(await page.locator('input[name=tax]').inputValue(),'4.88');assert.equal(await page.locator('.linecard').count(),2);
+ await page.getByRole('button',{name:'tax · page 1',exact:true}).click();assert.ok((await page.locator('.receipt mark').textContent()).includes('4.88'));
+ // Explicitly rotate a sideways image back before OCR.
+ const rotated=await page.evaluate(async image=>{const bitmap=await createImageBitmap(new Blob([new Uint8Array(image)],{type:'image/png'}));const c=document.createElement('canvas');c.width=bitmap.height;c.height=bitmap.width;const ctx=c.getContext('2d');ctx.translate(c.width,0);ctx.rotate(Math.PI/2);ctx.drawImage(bitmap,0,0);bitmap.close();return [...new Uint8Array(await (await new Promise(r=>c.toBlob(r))).arrayBuffer())];},[...image]);
+ await page.getByRole('button',{name:'← All invoices'}).click();await page.getByRole('button',{name:'+ Upload invoice',exact:true}).click();await page.locator('#image-rotation').selectOption('270');await page.locator('#invoice-file').setInputFiles({name:'sideways.png',mimeType:'image/png',buffer:Buffer.from(rotated)});await page.getByRole('button',{name:'Extract & open review'}).click();await page.locator('#invoice-form').waitFor();assert.equal(await page.locator('input[name=number]').inputValue(),'LP-444');
+ console.log(`OCR quality: ${metrics.baselineErrors} → ${metrics.revisedErrors} character errors across ${metrics.characters} non-whitespace characters. Small-image extraction, source highlighting, and rotation passed.`);
+}finally{await browser.close();server.close();}

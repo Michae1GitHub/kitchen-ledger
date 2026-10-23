@@ -1,0 +1,12 @@
+node_modules/
+*.zip
+.env*
+test-results/
+playwright-report/
+.openai/local/
+dist/server/
+dist/.openai/
+
+worker/index.js
+.openai/hosting.json
+.DS_Store
