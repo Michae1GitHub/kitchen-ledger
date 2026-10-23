@@ -6,7 +6,8 @@ export async function handleAI(request,env={},fetcher=fetch){
  if(request.method!=='POST')return json({error:'Method not allowed'},405);
  const origin=request.headers.get('Origin');if(origin&&origin!==url.origin)return json({error:'Origin not allowed'},403);
  let body;try{if(Number(request.headers.get('Content-Length'))>6000000)return json({error:'Invoice context is too large.'},413);const text=await request.text();if(text.length>6000000)return json({error:'Invoice context is too large.'},413);body=JSON.parse(text);}catch{return json({error:'Invalid request.'},400);}
- const apiKey=String(env.GEMINI_API_KEY||request.headers.get('X-Google-Key')||'').trim();
+ const personalKey=String(request.headers.get('X-Google-Key')||'').trim();
+ const apiKey=personalKey||String(env.GEMINI_API_KEY||'').trim();
  if(!apiKey)return json({error:'Add your Google AI Studio key in the invoice assistant to enable AI answers.',code:'AI_KEY_REQUIRED'},503);
  // Credentials are opaque: Google supports both standard and authorization keys.
  // Bound header size and reject whitespace/control characters, without assuming

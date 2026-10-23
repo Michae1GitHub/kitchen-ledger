@@ -6,12 +6,13 @@
     "start": "node server.mjs",
     "test": "node --test tests/*.test.mjs",
     "build": "node scripts/build-worker.mjs",
+    "test:auth": "node tests/auth-browser.mjs",
+    "test:ai-keys": "node tests/ai-keys-browser.mjs",
     "pretest": "node scripts/build-worker.mjs",
     "test:browser": "node tests/browser.mjs",
     "test:recipes": "node tests/v2-browser.mjs",
     "test:cloud": "node tests/v2-cloud-browser.mjs",
-    "test:lists": "node tests/pagination-browser.mjs",
-    "test:auth": "node tests/auth-browser.mjs"
+    "test:lists": "node tests/pagination-browser.mjs"
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.3.14",

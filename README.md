@@ -140,17 +140,23 @@ For real records, add your own suppliers/items and opening counts. Sample record
 | Upload fails | Confirm the private `invoices` bucket/policies exist; use a supported file under 20 MB and an authenticated account. |
 | Inventory unchanged after approval | Receive the delivery separately; approval alone does not add stock. |
 
-## Optional invoice AI
+## Invoice AI: shared default and personal keys
 
-The assistant uses Google's open-weight **Gemma** model through the Gemini API; Gemini itself is not an open-source model. Default model: `gemma-4-26b-a4b-it`.
+The public website provides a shared default key, so visitors can ask about an invoice immediately. The assistant uses Google's open-weight **Gemma** model through the Gemini API; Gemini itself is not an open-source model. Default model: `gemma-4-26b-a4b-it`.
 
-1. Obtain a key from [Google AI Studio](https://aistudio.google.com/api-keys).
-2. Open an invoice, expand **Google AI key**, paste the key into the masked field, and ask a question.
-3. The key is held only in browser memory and is cleared on refresh, forgetting it, or sign-out. It is sent through the same-origin server to Google, not stored in Supabase.
+For your own installation, set `GEMINI_API_KEY` as a **server-side runtime secret** (or a process environment variable for the local Node server). `GEMINI_MODEL` optionally overrides the model. Redeploy after changing hosted secrets. The server does **not** load `.env` files automatically. The repository contains no default provider key; clones must configure their own.
 
-Only clicking **Ask** sends the invoice text, reviewed fields, recent conversation, and optional selected image to Google. Answers cannot approve invoices or change stock. Review important answers against the source.
+Users can still expand **Personal Google AI key (optional)** on an invoice and enter a key from [Google AI Studio](https://aistudio.google.com/api-keys). It saves automatically and takes priority:
 
-For a private local deployment, you can instead set `GEMINI_API_KEY` in the server process environment. `GEMINI_MODEL` optionally overrides the model. The server does **not** automatically load `.env` files. Never commit provider keys. This repository's public demo uses visitor-supplied keys; add authentication, quotas, and rate limits before exposing a shared server-funded AI key.
+1. A personal key entered or remembered for this workspace.
+2. The shared server default, if no personal key is selected.
+3. An explicit setup error if neither is available.
+
+Personal keys are saved in this browser's localStorage, scoped to the configured Supabase project and signed-in email. The anonymous/dummy workspace has its own browser-local entry. Returning to the same account on the same browser reuses its key; different accounts do not inherit it. Sign-out clears the current key from memory but leaves its account-specific saved entry for later visits. **Forget key** deletes that entry and returns to the shared default. Clearing browser data also removes saved keys. This is browser-local plaintext storage, not encrypted or cross-device secret synchronization; anyone with access to the browser profile can potentially access saved personal keys. Use Forget on shared devices.
+
+The shared default is never exposed through browser code, API responses, Supabase records, or this repository. Only an availability flag is returned by `/api/ai-status`. Personal keys are sent to the same-origin server in a request header when asking a question, and then used to authenticate to Google. A failing personal key shows its error and does not silently consume shared quota. Shared-key traffic uses the owner's Google quota; quota or provider failures remain visible.
+
+Only clicking **Ask** sends invoice text, reviewed fields, recent chat and the optional selected image to Google. Answers cannot approve invoices or change stock. Review important answers against the source.
 
 ## Development and verification
 
@@ -172,6 +178,7 @@ pnpm run test:recipes
 pnpm run test:lists
 pnpm run test:cloud
 pnpm run test:auth
+pnpm run test:ai-keys
 ```
 
 Tests use Playwright Chromium by default. On Windows with Microsoft Edge installed, set `PLAYWRIGHT_CHANNEL=msedge` in the process environment to use it instead. Cloud-adapter tests intercept HTTP requests into a local PostgreSQL engine; they do not access your real project. Reports/screenshots are written to ignored `test-results/`.
